@@ -31,6 +31,7 @@ EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
 def build_egress_sidecar_container(
     egress_image: str,
     network_policy: NetworkPolicy,
+    egress_auth_token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build egress sidecar container specification for Kubernetes Pod.
@@ -82,16 +83,25 @@ def build_egress_sidecar_container(
         network_policy.model_dump(by_alias=True, exclude_none=True)
     )
     
+    env = [
+        {
+            "name": EGRESS_RULES_ENV,
+            "value": policy_payload,
+        }
+    ]
+    if egress_auth_token:
+        env.append(
+            {
+                "name": "OPENSANDBOX_EGRESS_TOKEN",
+                "value": egress_auth_token,
+            }
+        )
+
     # Build container specification
     container_spec: Dict[str, Any] = {
         "name": "egress",
         "image": egress_image,
-        "env": [
-            {
-                "name": EGRESS_RULES_ENV,
-                "value": policy_payload,
-            }
-        ],
+        "env": env,
         "securityContext": _build_security_context_for_egress(),
     }
     
@@ -186,6 +196,7 @@ def apply_egress_to_spec(
     containers: List[Dict[str, Any]],
     network_policy: Optional[NetworkPolicy],
     egress_image: Optional[str],
+    egress_auth_token: Optional[str] = None,
 ) -> None:
     """
     Apply egress sidecar configuration to Pod spec.
@@ -225,6 +236,7 @@ def apply_egress_to_spec(
     sidecar_container = build_egress_sidecar_container(
         egress_image=egress_image,
         network_policy=network_policy,
+        egress_auth_token=egress_auth_token,
     )
     containers.append(sidecar_container)
     

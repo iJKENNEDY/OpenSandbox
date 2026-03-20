@@ -19,6 +19,7 @@ import {
   SandboxApiException,
   Sandbox,
   DEFAULT_EXECD_PORT,
+  DEFAULT_EGRESS_PORT,
   SandboxManager,
   type ExecutionHandlers,
   type ExecutionComplete,
@@ -177,6 +178,52 @@ test("01a sandbox create with networkPolicy", async () => {
     expect(githubAllowed.error).toBeUndefined();
     const pypiDenied = await networkPolicySandbox.commands.run("curl -I https://pypi.org");
     expect(pypiDenied.error).toBeTruthy();
+  } finally {
+    try {
+      await networkPolicySandbox.kill();
+    } catch {
+      // ignore
+    }
+  }
+}, 3 * 60_000);
+
+test("01aa sandbox create with networkPolicy via server proxy", async () => {
+  const connectionConfig = createConnectionConfig(true);
+  const networkPolicySandbox = await Sandbox.create({
+    connectionConfig,
+    image: getSandboxImage(),
+    timeoutSeconds: 2 * 60,
+    readyTimeoutSeconds: 60,
+    networkPolicy: {
+      defaultAction: "deny",
+      egress: [{ action: "allow", target: "pypi.org" }],
+    },
+  });
+  await new Promise((r) => setTimeout(r, 5000));
+  try {
+    const egressEndpoint = await networkPolicySandbox.getEndpoint(DEFAULT_EGRESS_PORT);
+    expect(egressEndpoint.endpoint).toContain(
+      `/sandboxes/${networkPolicySandbox.id}/proxy/${DEFAULT_EGRESS_PORT}`
+    );
+
+    const initialPolicy = await networkPolicySandbox.getEgressPolicy();
+    expect(initialPolicy.defaultAction).toBe("deny");
+    expect(initialPolicy.egress?.some((r) => r.target === "pypi.org" && r.action === "allow")).toBe(true);
+
+    const blocked = await networkPolicySandbox.commands.run("curl -I https://www.github.com");
+    expect(blocked.error).toBeTruthy();
+    const allowed = await networkPolicySandbox.commands.run("curl -I https://pypi.org");
+    expect(allowed.error).toBeUndefined();
+
+    await networkPolicySandbox.patchEgressRules([
+      { action: "allow", target: "www.github.com" },
+      { action: "deny", target: "pypi.org" },
+    ]);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const patchedPolicy = await networkPolicySandbox.getEgressPolicy();
+    expect(patchedPolicy.egress?.some((r) => r.target === "www.github.com" && r.action === "allow")).toBe(true);
+    expect(patchedPolicy.egress?.some((r) => r.target === "pypi.org" && r.action === "deny")).toBe(true);
   } finally {
     try {
       await networkPolicySandbox.kill();

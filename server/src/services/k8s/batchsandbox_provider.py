@@ -113,6 +113,8 @@ class BatchSandboxProvider(WorkloadProvider):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        annotations: Optional[Dict[str, str]] = None,
+        egress_auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -220,6 +222,7 @@ class BatchSandboxProvider(WorkloadProvider):
             containers=containers,
             network_policy=network_policy,
             egress_image=egress_image,
+            egress_auth_token=egress_auth_token,
         )
 
         # Add user-specified volumes if provided
@@ -242,6 +245,8 @@ class BatchSandboxProvider(WorkloadProvider):
             },
             "spec": spec,
         }
+        if annotations:
+            runtime_manifest["metadata"]["annotations"] = annotations
         
         # Merge with template to get final manifest
         batchsandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)

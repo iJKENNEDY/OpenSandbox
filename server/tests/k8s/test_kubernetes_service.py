@@ -22,8 +22,15 @@ from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 
 from src.services.k8s.kubernetes_service import KubernetesSandboxService
-from src.services.constants import SANDBOX_MANUAL_CLEANUP_LABEL, SandboxErrorCodes
-from src.api.schema import ImageAuth, ListSandboxesRequest
+from src.services.constants import (
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
+    SANDBOX_MANUAL_CLEANUP_LABEL,
+    SandboxErrorCodes,
+)
+from src.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy
+from src.config import EgressConfig
+from src.api.schema import Endpoint
 
 
 class TestKubernetesSandboxServiceInit:
@@ -214,6 +221,53 @@ class TestKubernetesSandboxServiceCreate:
         _, kwargs = k8s_service.workload_provider.create_workload.call_args
         assert kwargs["expires_at"] is None
         assert kwargs["labels"].get(SANDBOX_MANUAL_CLEANUP_LABEL) == "true"
+
+    def test_create_sandbox_with_network_policy_passes_egress_token_and_annotations(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
+        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.3")
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id", "uid": "uid-1"
+        }
+        k8s_service.workload_provider.get_workload.return_value = MagicMock()
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running", "reason": "", "message": "",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        with patch(
+            "src.services.k8s.kubernetes_service.generate_egress_token",
+            return_value="egress-token",
+        ):
+            k8s_service.create_sandbox(create_sandbox_request)
+
+        _, kwargs = k8s_service.workload_provider.create_workload.call_args
+        assert kwargs["egress_auth_token"] == "egress-token"
+        assert kwargs["annotations"][SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] == "egress-token"
+
+    def test_get_endpoint_merges_egress_auth_header_from_instance_metadata(
+        self, k8s_service
+    ):
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {
+                "annotations": {
+                    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token",
+                }
+            }
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = Endpoint(
+            endpoint="gateway.example.com",
+            headers={"OpenSandbox-Ingress-To": "sbx-123-44772"},
+        )
+
+        endpoint = k8s_service.get_endpoint("sbx-123", 44772)
+
+        assert endpoint.endpoint == "gateway.example.com"
+        assert endpoint.headers == {
+            "OpenSandbox-Ingress-To": "sbx-123-44772",
+            OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token",
+        }
 
     def test_create_sandbox_rejects_timeout_above_configured_maximum(
         self, k8s_service, create_sandbox_request

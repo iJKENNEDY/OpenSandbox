@@ -63,6 +63,22 @@ class TestBuildEgressSidecarContainer:
         assert env_vars[0]["name"] == EGRESS_RULES_ENV
         assert env_vars[0]["value"] is not None
 
+    def test_contains_egress_token_when_provided(self):
+        egress_image = "opensandbox/egress:v1.0.3"
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        container = build_egress_sidecar_container(
+            egress_image,
+            network_policy,
+            egress_auth_token="egress-token",
+        )
+
+        env_vars = {env["name"]: env["value"] for env in container["env"]}
+        assert env_vars["OPENSANDBOX_EGRESS_TOKEN"] == "egress-token"
+
     def test_serializes_network_policy_correctly(self):
         """Test that network policy is correctly serialized to JSON."""
         egress_image = "opensandbox/egress:v1.0.3"

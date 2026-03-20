@@ -41,10 +41,13 @@ from src.api.schema import (
 )
 from src.config import AppConfig, get_config
 from src.services.constants import (
+    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_ID_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
+from src.services.endpoint_auth import generate_egress_token
+from src.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
 from src.services.helpers import matches_filter
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
@@ -285,6 +288,7 @@ class KubernetesSandboxService(SandboxService):
         labels = {
             SANDBOX_ID_LABEL: sandbox_id,
         }
+        annotations: Dict[str, str] = {}
         if expires_at is None:
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
         
@@ -300,8 +304,11 @@ class KubernetesSandboxService(SandboxService):
         try:
             # Get egress image if network policy is provided
             egress_image = None
+            egress_auth_token = None
             if request.network_policy:
                 egress_image = self.app_config.egress.image if self.app_config.egress else None
+                egress_auth_token = generate_egress_token()
+                annotations[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_auth_token
             
             # Validate volumes before creating workload
             ensure_volumes_valid(
@@ -318,11 +325,13 @@ class KubernetesSandboxService(SandboxService):
                 env=request.env or {},
                 resource_limits=resource_limits,
                 labels=labels,
+                annotations=annotations or None,
                 expires_at=expires_at,
                 execd_image=self.execd_image,
                 extensions=request.extensions,
                 network_policy=request.network_policy,
                 egress_image=egress_image,
+                egress_auth_token=egress_auth_token,
                 volumes=request.volumes,
             )
             
@@ -691,6 +700,7 @@ class KubernetesSandboxService(SandboxService):
                         "message": "Pod IP is not yet available. The Pod may still be starting.",
                     },
                 )
+            self._attach_egress_auth_headers(endpoint, workload)
             return endpoint
             
         except HTTPException:
@@ -704,7 +714,29 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to get endpoint: {str(e)}",
                 },
             ) from e
-    
+
+    def _attach_egress_auth_headers(self, endpoint: Endpoint, workload: Any) -> None:
+        token = self._get_egress_auth_token(workload)
+        if not token:
+            return
+
+        endpoint.headers = merge_endpoint_headers(
+            endpoint.headers,
+            build_egress_auth_headers(token),
+        )
+
+    def _get_egress_auth_token(self, workload: Any) -> Optional[str]:
+        if isinstance(workload, dict):
+            metadata = workload.get("metadata", {})
+            annotations = metadata.get("annotations", {}) or {}
+            return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
+
+        metadata = getattr(workload, "metadata", None)
+        annotations = getattr(metadata, "annotations", None) or {}
+        if isinstance(annotations, dict):
+            return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
+        return None
+
     def _build_sandbox_from_workload(self, workload: Any) -> Sandbox:
         """
         Build Sandbox object from Kubernetes workload.

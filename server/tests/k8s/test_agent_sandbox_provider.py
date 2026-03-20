@@ -25,6 +25,7 @@ from kubernetes.client import ApiException
 
 from src.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from src.config import AppConfig, ExecdInitResources, KubernetesRuntimeConfig, AgentSandboxRuntimeConfig, RuntimeConfig
+from src.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
 
 
@@ -534,6 +535,37 @@ class TestAgentSandboxProviderEgress:
         assert "capabilities" in sidecar["securityContext"]
         assert "add" in sidecar["securityContext"]["capabilities"]
         assert "NET_ADMIN" in sidecar["securityContext"]["capabilities"]["add"]
+
+    def test_create_workload_with_network_policy_persists_annotation_and_sidecar_token(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            network_policy=NetworkPolicy(default_action="deny", egress=[]),
+            egress_image="opensandbox/egress:v1.0.3",
+            annotations={SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token"},
+            egress_auth_token="egress-token",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        assert body["metadata"]["annotations"][SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] == "egress-token"
+
+        containers = body["spec"]["podTemplate"]["spec"]["containers"]
+        sidecar = next((c for c in containers if c["name"] == "egress"), None)
+        assert sidecar is not None
+        env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
+        assert env_vars["OPENSANDBOX_EGRESS_TOKEN"] == "egress-token"
 
     def test_create_workload_with_network_policy_adds_ipv6_disable_sysctls(self, mock_k8s_client):
         """

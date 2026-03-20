@@ -31,6 +31,7 @@ from src.config import (
     IngressConfig,
 )
 from src.services.constants import (
+    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_ID_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
@@ -367,6 +368,8 @@ def test_egress_sidecar_injection_and_capabilities(mock_docker):
     )
 
     with (
+        patch("src.services.docker.generate_egress_token", return_value="egress-token"),
+        patch.object(service, "_allocate_distinct_host_ports", return_value=(44772, 8080)),
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
     ):
@@ -392,6 +395,10 @@ def test_egress_sidecar_injection_and_capabilities(mock_docker):
     labels = main_kwargs["labels"]
     assert labels.get("opensandbox.io/embedding-proxy-port")
     assert labels.get("opensandbox.io/http-port")
+    assert labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] == "egress-token"
+
+    sidecar_env = sidecar_kwargs["environment"]
+    assert "OPENSANDBOX_EGRESS_TOKEN=egress-token" in sidecar_env
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +551,7 @@ def test_egress_sidecar_cleanup_uses_api_remove_when_lookup_fails(mock_docker):
             service._start_egress_sidecar(
                 "sandbox-id",
                 NetworkPolicy(defaultAction="deny", egress=[]),
+                egress_token="egress-token",
                 host_execd_port=44772,
                 host_http_port=8080,
             )
@@ -584,6 +592,7 @@ def test_egress_sidecar_missing_id_preserves_specific_error(mock_docker):
             service._start_egress_sidecar(
                 "sandbox-id",
                 NetworkPolicy(defaultAction="deny", egress=[]),
+                egress_token="egress-token",
                 host_execd_port=44772,
                 host_http_port=8080,
             )
@@ -626,6 +635,7 @@ def test_egress_sidecar_cleanup_wraps_unexpected_lookup_error(mock_docker):
             service._start_egress_sidecar(
                 "sandbox-id",
                 NetworkPolicy(defaultAction="deny", egress=[]),
+                egress_token="egress-token",
                 host_execd_port=44772,
                 host_http_port=8080,
             )

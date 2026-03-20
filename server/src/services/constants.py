@@ -24,6 +24,8 @@ SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # ma
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
 SANDBOX_OSSFS_MOUNTS_LABEL = "opensandbox.io/ossfs-mounts"
 OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
+OPEN_SANDBOX_EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
+SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY = "opensandbox.io/egress-auth-token"
 
 class SandboxErrorCodes:
     """Canonical error codes for sandbox service operations."""
@@ -97,5 +99,7 @@ __all__ = [
     "SANDBOX_HTTP_PORT_LABEL",
     "SANDBOX_OSSFS_MOUNTS_LABEL",
     "OPEN_SANDBOX_INGRESS_HEADER",
+    "OPEN_SANDBOX_EGRESS_AUTH_HEADER",
+    "SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY",
     "SandboxErrorCodes",
 ]

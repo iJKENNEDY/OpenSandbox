@@ -134,6 +134,8 @@ class AgentSandboxProvider(WorkloadProvider):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        annotations: Optional[Dict[str, str]] = None,
+        egress_auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create an agent-sandbox Sandbox CRD workload."""
         if self.runtime_class:
@@ -151,6 +153,7 @@ class AgentSandboxProvider(WorkloadProvider):
             execd_image=execd_image,
             network_policy=network_policy,
             egress_image=egress_image,
+            egress_auth_token=egress_auth_token,
         )
 
         # Add user-specified volumes if provided
@@ -181,6 +184,8 @@ class AgentSandboxProvider(WorkloadProvider):
             },
             "spec": spec,
         }
+        if annotations:
+            runtime_manifest["metadata"]["annotations"] = annotations
 
         sandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)
         # Set or strip shutdownTime after merge so we override any template value
@@ -211,6 +216,7 @@ class AgentSandboxProvider(WorkloadProvider):
         execd_image: str,
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
+        egress_auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
         init_container = self._build_execd_init_container(execd_image)
@@ -247,6 +253,7 @@ class AgentSandboxProvider(WorkloadProvider):
             containers=containers,
             network_policy=network_policy,
             egress_image=egress_image,
+            egress_auth_token=egress_auth_token,
         )
         
         return pod_spec
@@ -560,4 +567,3 @@ class AgentSandboxProvider(WorkloadProvider):
             return Endpoint(endpoint=f"{service_fqdn}:{port}")
 
         return None
-

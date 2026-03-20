@@ -370,6 +370,112 @@ public class SandboxE2ETest extends BaseE2ETest {
 
     @Test
     @Order(2)
+    @DisplayName("Sandbox create with networkPolicy + get/patch egress via server proxy")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithNetworkPolicyViaServerProxy() {
+        NetworkPolicy networkPolicy =
+                NetworkPolicy.builder()
+                        .defaultAction(NetworkPolicy.DefaultAction.DENY)
+                        .addEgress(
+                                NetworkRule.builder()
+                                        .action(NetworkRule.Action.ALLOW)
+                                        .target("pypi.org")
+                                        .build())
+                        .build();
+
+        Sandbox policySandbox =
+                Sandbox.builder()
+                        .connectionConfig(createConnectionConfig(true))
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .networkPolicy(networkPolicy)
+                        .build();
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException ignored) {
+        }
+
+        try {
+            SandboxEndpoint egressEndpoint = policySandbox.getEndpoint(18080);
+            assertTrue(
+                    egressEndpoint.getEndpoint().contains(
+                            "/sandboxes/" + policySandbox.getId() + "/proxy/18080"));
+
+            NetworkPolicy initialPolicy = policySandbox.getEgressPolicy();
+            assertNotNull(initialPolicy);
+            assertEquals(NetworkPolicy.DefaultAction.DENY, initialPolicy.getDefaultAction());
+            assertNotNull(initialPolicy.getEgress());
+            assertTrue(
+                    initialPolicy.getEgress().stream()
+                            .anyMatch(
+                                    r ->
+                                            "pypi.org".equals(r.getTarget())
+                                                    && r.getAction() == NetworkRule.Action.ALLOW));
+
+            Execution blocked =
+                    policySandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://www.github.com")
+                                            .build());
+            assertNotNull(blocked);
+            assertNotNull(blocked.getError());
+
+            Execution allowed =
+                    policySandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://pypi.org")
+                                            .build());
+            assertNotNull(allowed);
+            assertNull(allowed.getError());
+
+            policySandbox.patchEgressRules(
+                    List.of(
+                            NetworkRule.builder()
+                                    .action(NetworkRule.Action.ALLOW)
+                                    .target("www.github.com")
+                                    .build(),
+                            NetworkRule.builder()
+                                    .action(NetworkRule.Action.DENY)
+                                    .target("pypi.org")
+                                    .build()));
+
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException ignored) {
+            }
+
+            NetworkPolicy patchedPolicy = policySandbox.getEgressPolicy();
+            assertNotNull(patchedPolicy.getEgress());
+            assertTrue(
+                    patchedPolicy.getEgress().stream()
+                            .anyMatch(
+                                    rule ->
+                                            "www.github.com".equals(rule.getTarget())
+                                                    && rule.getAction()
+                                                            == NetworkRule.Action.ALLOW));
+            assertTrue(
+                    patchedPolicy.getEgress().stream()
+                            .anyMatch(
+                                    rule ->
+                                            "pypi.org".equals(rule.getTarget())
+                                                    && rule.getAction()
+                                                            == NetworkRule.Action.DENY));
+        } finally {
+            try {
+                policySandbox.kill();
+            } catch (Exception ignored) {
+            }
+            policySandbox.close();
+        }
+    }
+
+    @Test
+    @Order(2)
     @DisplayName("Sandbox create with host volume mount (read-write)")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void testSandboxCreateWithHostVolumeMount() {

@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from src.api import lifecycle
 from src.api.schema import Endpoint
+from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER
 
 
 class _FakeStreamingResponse:
@@ -338,3 +339,68 @@ def test_proxy_maps_unexpected_error_to_500(
 
     assert response.status_code == 500
     assert "An internal error occurred in the proxy" in response.json()["message"]
+
+
+def test_proxy_forwards_18080_without_server_side_egress_auth_check(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert port == 18080
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:18080")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=401,
+        headers={"content-type": "application/json"},
+        chunks=[b'{"code":"UNAUTHORIZED"}'],
+    )
+    client.app.state.http_client = fake_client
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/18080/policy",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "UNAUTHORIZED"
+    assert fake_client.built is not None
+    assert fake_client.built["url"] == "http://10.57.1.91:18080/policy"
+
+
+def test_proxy_forwards_egress_auth_header_for_18080(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert port == 18080
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:18080")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=200,
+        headers={"content-type": "application/json"},
+        chunks=[b'{"status":"ok"}'],
+    )
+    client.app.state.http_client = fake_client
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/18080/policy",
+        headers={**auth_headers, OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"},
+    )
+
+    assert response.status_code == 200
+    assert fake_client.built is not None
+    lowered_headers = {k.lower(): v for k, v in fake_client.built["headers"].items()}
+    assert lowered_headers[OPEN_SANDBOX_EGRESS_AUTH_HEADER.lower()] == "egress-token"

@@ -47,6 +47,8 @@ class WorkloadProvider(ABC):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        annotations: Optional[Dict[str, str]] = None,
+        egress_auth_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
