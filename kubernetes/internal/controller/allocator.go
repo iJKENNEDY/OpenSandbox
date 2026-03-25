@@ -27,17 +27,12 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
-	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/expectations"
-)
-
-var (
-	poolResExpectations = expectations.NewResourceVersionExpectation()
 )
 
 type AllocationStore interface {
 	GetAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool) (*PoolAllocation, error)
 	SetAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool, allocation *PoolAllocation) error
-	UpdateAllocation(ctx context.Context, poolName string, sandboxName string, pods []string)
+	UpdateAllocation(ctx context.Context, ns string, poolName string, sandboxName string, pods []string)
 	Recover(ctx context.Context, c client.Client) error
 }
 
@@ -51,14 +46,12 @@ type poolEntry struct {
 type InMemoryAllocationStore struct {
 	poolsMu sync.RWMutex
 	pools   map[string]*poolEntry
-	client  client.Client
 	syncer  *annoAllocationSyncer
 }
 
-func NewInMemoryAllocationStore(c client.Client) AllocationStore {
+func NewInMemoryAllocationStore() AllocationStore {
 	return &InMemoryAllocationStore{
 		pools:  make(map[string]*poolEntry),
-		client: c,
 		syncer: &annoAllocationSyncer{},
 	}
 }
@@ -74,10 +67,8 @@ func (store *InMemoryAllocationStore) Recover(ctx context.Context, c client.Clie
 		return fmt.Errorf("failed to list batch sandboxes for recovery: %w", err)
 	}
 
-	store.poolsMu.Lock()
-	defer store.poolsMu.Unlock()
-
-	store.pools = make(map[string]*poolEntry)
+	// Build new pools map first without holding the lock
+	newPools := make(map[string]*poolEntry)
 
 	for _, sbx := range batchSandboxList.Items {
 		poolRef := sbx.Spec.PoolRef
@@ -89,14 +80,17 @@ func (store *InMemoryAllocationStore) Recover(ctx context.Context, c client.Clie
 			log.Error(err, "Failed to unmarshal sandbox allocation during recovery", "sandbox", sbx.Name)
 			return err
 		}
-		if store.pools[poolRef] == nil {
-			store.pools[poolRef] = &poolEntry{
+		key := store.poolKey(sbx.Namespace, poolRef)
+		entry, exists := newPools[key]
+		if !exists {
+			entry = &poolEntry{
 				data: make(map[string]string),
 			}
+			newPools[key] = entry
 		}
 
 		for _, podName := range allocation.Pods {
-			store.pools[poolRef].data[podName] = sbx.Name
+			entry.data[podName] = sbx.Name
 		}
 		// Filter released pods
 		allocRelease, err := store.syncer.GetRelease(ctx, &sbx)
@@ -105,11 +99,15 @@ func (store *InMemoryAllocationStore) Recover(ctx context.Context, c client.Clie
 			return err
 		}
 		for _, podName := range allocRelease.Pods {
-			delete(store.pools[poolRef].data, podName)
+			delete(entry.data, podName)
 		}
 
 		log.Info("Recovered sandbox allocation", "pool", poolRef, "sandbox", sbx.Name, "pods", len(allocation.Pods))
 	}
+
+	store.poolsMu.Lock()
+	store.pools = newPools
+	store.poolsMu.Unlock()
 
 	log.Info("Allocation recovery completed", "totalPools", len(store.pools))
 	return nil
@@ -117,7 +115,7 @@ func (store *InMemoryAllocationStore) Recover(ctx context.Context, c client.Clie
 
 func (store *InMemoryAllocationStore) GetAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool) (*PoolAllocation, error) {
 	store.poolsMu.RLock()
-	entry, exists := store.pools[pool.Name]
+	entry, exists := store.pools[store.poolKey(pool.Namespace, pool.Name)]
 	store.poolsMu.RUnlock()
 
 	alloc := &PoolAllocation{
@@ -139,7 +137,7 @@ func (store *InMemoryAllocationStore) GetAllocation(ctx context.Context, pool *s
 }
 
 func (store *InMemoryAllocationStore) SetAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool, alloc *PoolAllocation) error {
-	entry := store.getOrCreatePool(pool.Name)
+	entry := store.getOrCreatePool(pool.Namespace, pool.Name)
 
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
@@ -152,8 +150,8 @@ func (store *InMemoryAllocationStore) SetAllocation(ctx context.Context, pool *s
 	return nil
 }
 
-func (store *InMemoryAllocationStore) UpdateAllocation(ctx context.Context, poolName string, sandboxName string, pods []string) {
-	entry := store.getOrCreatePool(poolName)
+func (store *InMemoryAllocationStore) UpdateAllocation(ctx context.Context, ns string, poolName string, sandboxName string, pods []string) {
+	entry := store.getOrCreatePool(ns, poolName)
 
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
@@ -171,9 +169,9 @@ func (store *InMemoryAllocationStore) UpdateAllocation(ctx context.Context, pool
 
 // getOrCreatePool returns the pool entry for the given pool name, creating it if necessary.
 // This method uses a double-checked locking pattern to ensure thread-safe creation.
-func (store *InMemoryAllocationStore) getOrCreatePool(poolName string) *poolEntry {
+func (store *InMemoryAllocationStore) getOrCreatePool(ns string, poolName string) *poolEntry {
 	store.poolsMu.RLock()
-	entry, exists := store.pools[poolName]
+	entry, exists := store.pools[store.poolKey(ns, poolName)]
 	store.poolsMu.RUnlock()
 
 	if exists {
@@ -184,15 +182,19 @@ func (store *InMemoryAllocationStore) getOrCreatePool(poolName string) *poolEntr
 	defer store.poolsMu.Unlock()
 
 	// Double-check after acquiring write lock
-	if entry, exists := store.pools[poolName]; exists {
+	if entry, exists := store.pools[store.poolKey(ns, poolName)]; exists {
 		return entry
 	}
 
 	entry = &poolEntry{
 		data: make(map[string]string),
 	}
-	store.pools[poolName] = entry
+	store.pools[store.poolKey(ns, poolName)] = entry
 	return entry
+}
+
+func (store *InMemoryAllocationStore) poolKey(ns, name string) string {
+	return ns + "/" + name
 }
 
 type AllocationSyncer interface {
@@ -290,30 +292,37 @@ type Allocator interface {
 	Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, []SandboxSyncInfo, bool, error)
 	PersistPoolAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool, status *AllocStatus) error
 	SyncSandboxAllocation(ctx context.Context, sandbox *sandboxv1alpha1.BatchSandbox, pods []string) error
-	Recover(ctx context.Context) error
 }
 
 type defaultAllocator struct {
-	store  AllocationStore
-	syncer AllocationSyncer
-	client client.Client
+	store       AllocationStore
+	syncer      AllocationSyncer
+	client      client.Client
+	recoverOnce sync.Once
 }
 
 func NewDefaultAllocator(client client.Client) Allocator {
 	return &defaultAllocator{
-		store:  NewInMemoryAllocationStore(client),
+		store:  NewInMemoryAllocationStore(),
 		syncer: NewAnnoAllocationSyncer(client),
 		client: client,
 	}
 }
 
-func (allocator *defaultAllocator) Recover(ctx context.Context) error {
-	return allocator.store.Recover(ctx, allocator.client)
+func (allocator *defaultAllocator) checkRecovery(ctx context.Context) {
+	log := logf.FromContext(ctx)
+	allocator.recoverOnce.Do(func() {
+		if err := allocator.store.Recover(ctx, allocator.client); err != nil {
+			log.Error(err, "Allocator state recovery failed")
+			panic("Recover allocation state failed: " + err.Error())
+		}
+	})
 }
 
 func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, []SandboxSyncInfo, bool, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Schedule started", "pool", spec.Pool.Name, "totalPods", len(spec.Pods), "sandboxes", len(spec.Sandboxes))
+	allocator.checkRecovery(ctx)
 	status, err := allocator.initAllocation(ctx, spec)
 	if err != nil {
 		return nil, nil, false, err
@@ -552,7 +561,7 @@ func (allocator *defaultAllocator) SyncSandboxAllocation(ctx context.Context, sa
 	allocation := &SandboxAllocation{Pods: pods}
 	if err := allocator.syncer.SetAllocation(ctx, sandbox, allocation); err != nil {
 		log.Error(err, "Rollback sandbox allocation", "sandbox", sandbox.Name, "pods", oldState.Pods)
-		allocator.store.UpdateAllocation(ctx, poolRef, sandbox.Name, oldState.Pods)
+		allocator.store.UpdateAllocation(ctx, sandbox.Namespace, poolRef, sandbox.Name, oldState.Pods)
 		return err
 	}
 	return nil

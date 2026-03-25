@@ -29,10 +29,7 @@ import (
 )
 
 func TestInMemoryAllocationStore_GetAllocation_Empty(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool := &sandboxv1alpha1.Pool{
@@ -46,10 +43,7 @@ func TestInMemoryAllocationStore_GetAllocation_Empty(t *testing.T) {
 }
 
 func TestInMemoryAllocationStore_SetAndGetAllocation(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool := &sandboxv1alpha1.Pool{
@@ -72,75 +66,60 @@ func TestInMemoryAllocationStore_SetAndGetAllocation(t *testing.T) {
 }
 
 func TestInMemoryAllocationStore_UpdateAllocation_AddPods(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod1", "pod2"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod1", "pod2"})
 
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod1"])
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod2"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod1"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod2"])
 }
 
 func TestInMemoryAllocationStore_UpdateAllocation_ReplacePods(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod1", "pod2"})
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod3", "pod4"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod1", "pod2"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod3", "pod4"})
 
-	_, exists1 := store.pools["pool1"].data["pod1"]
-	_, exists2 := store.pools["pool1"].data["pod2"]
+	_, exists1 := store.pools["default/pool1"].data["pod1"]
+	_, exists2 := store.pools["default/pool1"].data["pod2"]
 	assert.False(t, exists1, "old pod1 should be removed")
 	assert.False(t, exists2, "old pod2 should be removed")
 
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod3"])
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod4"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod3"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod4"])
 }
 
 func TestInMemoryAllocationStore_UpdateAllocation_MultipleSandboxes(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod1", "pod2"})
-	store.UpdateAllocation(ctx, "pool1", "sandbox2", []string{"pod3", "pod4"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod1", "pod2"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox2", []string{"pod3", "pod4"})
 
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod1"])
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod2"])
-	assert.Equal(t, "sandbox2", store.pools["pool1"].data["pod3"])
-	assert.Equal(t, "sandbox2", store.pools["pool1"].data["pod4"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod1"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod2"])
+	assert.Equal(t, "sandbox2", store.pools["default/pool1"].data["pod3"])
+	assert.Equal(t, "sandbox2", store.pools["default/pool1"].data["pod4"])
 }
 
 func TestInMemoryAllocationStore_UpdateAllocation_MultiplePools(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod1", "pod2"})
-	store.UpdateAllocation(ctx, "pool2", "sandbox2", []string{"pod3", "pod4"})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod1", "pod2"})
+	store.UpdateAllocation(ctx, "default", "pool2", "sandbox2", []string{"pod3", "pod4"})
 
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod1"])
-	assert.Equal(t, "sandbox2", store.pools["pool2"].data["pod3"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod1"])
+	assert.Equal(t, "sandbox2", store.pools["default/pool2"].data["pod3"])
 
-	_, exists := store.pools["pool1"].data["pod3"]
+	_, exists := store.pools["default/pool1"].data["pod3"]
 	assert.False(t, exists, "pool1 should not see pool2's pods")
 }
 
 func TestInMemoryAllocationStore_GetAllocation_IsolatedByPool(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool1 := &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}}
@@ -217,19 +196,19 @@ func TestInMemoryAllocationStore_Recover(t *testing.T) {
 		WithObjects(sandbox1, sandbox2, sandbox3).
 		Build()
 
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
 	err := store.Recover(ctx, client)
 	assert.NoError(t, err)
 
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod1"])
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["pod2"])
-	assert.Equal(t, "sandbox2", store.pools["pool1"].data["pod3"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod1"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod2"])
+	assert.Equal(t, "sandbox2", store.pools["default/pool1"].data["pod3"])
 	// Filter released pod4
-	assert.Equal(t, "", store.pools["pool1"].data["pod4"])
+	assert.Equal(t, "", store.pools["default/pool1"].data["pod4"])
 
-	assert.Equal(t, 0, len(store.pools["pool2"].data), "pool2 should have no allocations")
+	assert.Equal(t, 0, len(store.pools["default/pool2"].data), "pool2 should have no allocations")
 }
 
 func TestInMemoryAllocationStore_Recover_ClearsExisting(t *testing.T) {
@@ -237,10 +216,10 @@ func TestInMemoryAllocationStore_Recover_ClearsExisting(t *testing.T) {
 	_ = sandboxv1alpha1.AddToScheme(scheme)
 
 	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
-	store.pools["pool1"] = &poolEntry{data: map[string]string{"old-pod": "old-sandbox"}}
+	store.pools["default/pool1"] = &poolEntry{data: map[string]string{"old-pod": "old-sandbox"}}
 
 	allocation := &SandboxAllocation{Pods: []string{"new-pod"}}
 	allocJSON, _ := json.Marshal(allocation)
@@ -266,16 +245,13 @@ func TestInMemoryAllocationStore_Recover_ClearsExisting(t *testing.T) {
 	err := store.Recover(ctx, client)
 	assert.NoError(t, err)
 
-	_, exists := store.pools["pool1"].data["old-pod"]
+	_, exists := store.pools["default/pool1"].data["old-pod"]
 	assert.False(t, exists, "old allocation should be cleared")
-	assert.Equal(t, "sandbox1", store.pools["pool1"].data["new-pod"])
+	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["new-pod"])
 }
 
 func TestInMemoryAllocationStore_ThreadSafety(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
@@ -306,10 +282,7 @@ func TestInMemoryAllocationStore_ThreadSafety(t *testing.T) {
 }
 
 func TestInMemoryAllocationStore_GetAllocation_ReturnsCopy(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool := &sandboxv1alpha1.Pool{
@@ -333,10 +306,7 @@ func TestInMemoryAllocationStore_GetAllocation_ReturnsCopy(t *testing.T) {
 }
 
 func TestInMemoryAllocationStore_SandboxDeleted_PodsReturnedToPool(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool := &sandboxv1alpha1.Pool{
@@ -376,28 +346,22 @@ func TestInMemoryAllocationStore_SandboxDeleted_PodsReturnedToPool(t *testing.T)
 }
 
 func TestInMemoryAllocationStore_UpdateAllocation_EmptyPods_ReleaseAll(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client).(*InMemoryAllocationStore)
+	store := NewInMemoryAllocationStore().(*InMemoryAllocationStore)
 	ctx := context.Background()
 
 	// Setup initial allocation
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{"pod1", "pod2"})
-	assert.Equal(t, 2, len(store.pools["pool1"].data))
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{"pod1", "pod2"})
+	assert.Equal(t, 2, len(store.pools["default/pool1"].data))
 
 	// Update with empty pods (simulates release)
-	store.UpdateAllocation(ctx, "pool1", "sandbox1", []string{})
+	store.UpdateAllocation(ctx, "default", "pool1", "sandbox1", []string{})
 
 	// Verify all pods are released
-	assert.Empty(t, store.pools["pool1"].data, "all pods should be released when empty slice provided")
+	assert.Empty(t, store.pools["default/pool1"].data, "all pods should be released when empty slice provided")
 }
 
 func TestInMemoryAllocationStore_SetAllocation_ReplaceAll(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = sandboxv1alpha1.AddToScheme(scheme)
-	client := fake.NewClientBuilder().WithScheme(scheme).Build()
-	store := NewInMemoryAllocationStore(client)
+	store := NewInMemoryAllocationStore()
 	ctx := context.Background()
 
 	pool := &sandboxv1alpha1.Pool{
@@ -428,4 +392,70 @@ func TestInMemoryAllocationStore_SetAllocation_ReplaceAll(t *testing.T) {
 	assert.NotContains(t, result.PodAllocation, "pod2")
 	assert.Equal(t, "sandbox2", result.PodAllocation["pod3"])
 	assert.Equal(t, "sandbox2", result.PodAllocation["pod4"])
+}
+
+// TestInMemoryAllocationStore_MultiNamespaceSamePoolName tests that pools with the same name
+// in different namespaces are properly isolated from each other.
+func TestInMemoryAllocationStore_MultiNamespaceSamePoolName(t *testing.T) {
+	store := NewInMemoryAllocationStore()
+	ctx := context.Background()
+
+	// Create two pools with the same name but in different namespaces
+	poolNs1 := &sandboxv1alpha1.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-pool",
+			Namespace: "namespace1",
+		},
+	}
+	poolNs2 := &sandboxv1alpha1.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "shared-pool",
+			Namespace: "namespace2",
+		},
+	}
+
+	// Set different allocations for each namespace
+	_ = store.SetAllocation(ctx, poolNs1, &PoolAllocation{
+		PodAllocation: map[string]string{
+			"pod1": "sandbox1-ns1",
+			"pod2": "sandbox1-ns1",
+		},
+	})
+	_ = store.SetAllocation(ctx, poolNs2, &PoolAllocation{
+		PodAllocation: map[string]string{
+			"pod3": "sandbox1-ns2",
+			"pod4": "sandbox1-ns2",
+		},
+	})
+
+	// Verify each namespace only sees its own allocations
+	allocNs1, _ := store.GetAllocation(ctx, poolNs1)
+	allocNs2, _ := store.GetAllocation(ctx, poolNs2)
+
+	// Namespace1 should have pod1 and pod2
+	assert.Len(t, allocNs1.PodAllocation, 2)
+	assert.Equal(t, "sandbox1-ns1", allocNs1.PodAllocation["pod1"])
+	assert.Equal(t, "sandbox1-ns1", allocNs1.PodAllocation["pod2"])
+	assert.Empty(t, allocNs1.PodAllocation["pod3"], "namespace1 should not see namespace2's pods")
+	assert.Empty(t, allocNs1.PodAllocation["pod4"], "namespace1 should not see namespace2's pods")
+
+	// Namespace2 should have pod3 and pod4
+	assert.Len(t, allocNs2.PodAllocation, 2)
+	assert.Equal(t, "sandbox1-ns2", allocNs2.PodAllocation["pod3"])
+	assert.Equal(t, "sandbox1-ns2", allocNs2.PodAllocation["pod4"])
+	assert.Empty(t, allocNs2.PodAllocation["pod1"], "namespace2 should not see namespace1's pods")
+	assert.Empty(t, allocNs2.PodAllocation["pod2"], "namespace2 should not see namespace1's pods")
+
+	// Update allocation in namespace1 should not affect namespace2
+	_ = store.SetAllocation(ctx, poolNs1, &PoolAllocation{
+		PodAllocation: map[string]string{
+			"pod5": "sandbox2-ns1",
+		},
+	})
+
+	// Verify namespace2 is unchanged
+	allocNs2AfterUpdate, _ := store.GetAllocation(ctx, poolNs2)
+	assert.Len(t, allocNs2AfterUpdate.PodAllocation, 2, "namespace2 should still have 2 pods")
+	assert.Equal(t, "sandbox1-ns2", allocNs2AfterUpdate.PodAllocation["pod3"])
+	assert.Equal(t, "sandbox1-ns2", allocNs2AfterUpdate.PodAllocation["pod4"])
 }

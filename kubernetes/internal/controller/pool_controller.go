@@ -39,7 +39,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -298,9 +297,6 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			},
 		}
 	}
-	mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		return r.Allocator.Recover(ctx)
-	}))
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sandboxv1alpha1.Pool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).

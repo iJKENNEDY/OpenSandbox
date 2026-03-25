@@ -506,7 +506,7 @@ func getSandboxAllocation(obj kclient.Object) (*SandboxAllocation, error) {
 }
 
 func getPoolAllocation(pool *sandboxv1alpha1.Pool) (*PoolAllocation, error) {
-	store := NewInMemoryAllocationStore(k8sClient)
+	store := NewInMemoryAllocationStore()
 	if err := store.Recover(ctx, k8sClient); err != nil {
 		return nil, err
 	}

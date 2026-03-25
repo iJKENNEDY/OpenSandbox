@@ -67,15 +67,15 @@ func (mr *MockAllocationStoreMockRecorder) SetAllocation(ctx, pool, allocation i
 }
 
 // UpdateAllocation mocks base method.
-func (m *MockAllocationStore) UpdateAllocation(ctx context.Context, poolName string, sandboxName string, pods []string) {
+func (m *MockAllocationStore) UpdateAllocation(ctx context.Context, ns string, poolName string, sandboxName string, pods []string) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UpdateAllocation", ctx, poolName, sandboxName, pods)
+	m.ctrl.Call(m, "UpdateAllocation", ctx, ns, poolName, sandboxName, pods)
 }
 
 // UpdateAllocation indicates an expected call of UpdateAllocation.
-func (mr *MockAllocationStoreMockRecorder) UpdateAllocation(ctx, poolName, sandboxName, pods interface{}) *gomock.Call {
+func (mr *MockAllocationStoreMockRecorder) UpdateAllocation(ctx, ns, poolName, sandboxName, pods interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAllocation", reflect.TypeOf((*MockAllocationStore)(nil).UpdateAllocation), ctx, poolName, sandboxName, pods)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAllocation", reflect.TypeOf((*MockAllocationStore)(nil).UpdateAllocation), ctx, ns, poolName, sandboxName, pods)
 }
 
 // Recover mocks base method.
