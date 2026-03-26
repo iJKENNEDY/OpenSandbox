@@ -1719,6 +1719,159 @@ var _ = Describe("Manager", Ordered, func() {
 			cmd = exec.Command("kubectl", "delete", "pool", poolName, "-n", testNamespace)
 			_, _ = utils.Run(cmd)
 		})
+
+		It("should panic and exit when Recover fails due to malformed annotation", func() {
+			const poolName = "test-pool-recover-fail"
+			const batchSandboxName = "test-bs-malformed"
+			const testNamespace = "default"
+
+			By("first stopping controller to prevent early sync.Once execution")
+			cmd := exec.Command("kubectl", "scale", "deployment", "opensandbox-controller-manager",
+				"--replicas=0", "-n", namespace)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for controller pod to terminate")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-l", "control-plane=controller-manager",
+					"-n", namespace, "-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).ShouldNot(HaveOccurred())
+				g.Expect(strings.TrimSpace(output)).To(BeEmpty())
+			}, 30*time.Second, 2*time.Second).Should(Succeed())
+
+			By("creating a Pool (while controller is stopped)")
+			poolYAML, err := renderTemplate("testdata/pool-basic.yaml", map[string]interface{}{
+				"PoolName":     poolName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolFile := filepath.Join("/tmp", "test-pool-recover-fail.yaml")
+			err = os.WriteFile(poolFile, []byte(poolYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating a BatchSandbox with malformed alloc-status annotation (while controller is stopped)")
+			bsYAML, err := renderTemplate("testdata/batchsandbox-malformed-annotation.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"PoolName":         poolName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", "test-bs-malformed.yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying malformed annotation is set correctly")
+			cmd = exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+				"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/alloc-status}")
+			annoOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(annoOutput).To(ContainSubstring("invalid json"), "BatchSandbox should have malformed annotation")
+
+			By("verifying BatchSandbox has poolRef set")
+			cmd = exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+				"-o", "jsonpath={.spec.poolRef}")
+			poolRefOutput, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(poolRefOutput).To(Equal(poolName), "BatchSandbox should have poolRef set to %s", poolName)
+
+			By("scaling up controller-manager - should exit due to malformed annotation during Recover")
+			cmd = exec.Command("kubectl", "scale", "deployment", "opensandbox-controller-manager",
+				"--replicas=1", "-n", namespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for controller to process Pool, attempt Recover, and exit")
+			// Wait long enough for:
+			// 1. Container to start
+			// 2. Leader election to complete
+			// 3. Pool controller to reconcile and call Schedule -> checkRecovery -> Recover
+			// 4. Recover to fail and call os.Exit(1)
+			// 5. Container to restart
+			time.Sleep(60 * time.Second)
+
+			By("verifying container restarted and exited with code 1")
+			// Get pod status to check restartCount and exit code
+			cmd = exec.Command("kubectl", "get", "pods", "-l", "control-plane=controller-manager",
+				"-n", namespace, "-o", "json")
+			podJSON, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			var podList struct {
+				Items []struct {
+					Status struct {
+						ContainerStatuses []struct {
+							RestartCount int `json:"restartCount"`
+							LastState    struct {
+								Terminated *struct {
+									ExitCode int    `json:"exitCode"`
+									Reason   string `json:"reason"`
+								} `json:"terminated"`
+							} `json:"lastState"`
+							State struct {
+								Waiting *struct {
+									Reason  string `json:"reason"`
+									Message string `json:"message"`
+								} `json:"waiting"`
+							} `json:"state"`
+						} `json:"containerStatuses"`
+					} `json:"status"`
+				} `json:"items"`
+			}
+			err = json.Unmarshal([]byte(podJSON), &podList)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(podList.Items)).To(BeNumerically(">", 0), "Should have at least one controller pod")
+
+			// Find a container that has restarted
+			foundRestarted := false
+			for _, pod := range podList.Items {
+				for _, container := range pod.Status.ContainerStatuses {
+					if container.RestartCount > 0 {
+						foundRestarted = true
+						// Verify the last termination had exit code 1
+						if container.LastState.Terminated != nil {
+							Expect(container.LastState.Terminated.ExitCode).To(Equal(1),
+								"Container should exit with code 1 due to Recover failure")
+						}
+						break
+					}
+				}
+				if foundRestarted {
+					break
+				}
+			}
+			Expect(foundRestarted).To(BeTrue(), "Container should have restarted due to Recover failure")
+
+			By("cleaning up - deleting malformed BatchSandbox first")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+
+			By("restarting controller after cleanup - should succeed now")
+			err = restartController()
+			Expect(err).NotTo(HaveOccurred())
+
+			By("cleaning up pool")
+			cmd = exec.Command("kubectl", "delete", "pool", poolName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
 	})
 
 })

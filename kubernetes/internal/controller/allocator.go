@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	gerrors "errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 
@@ -314,7 +315,7 @@ func (allocator *defaultAllocator) checkRecovery(ctx context.Context) {
 	allocator.recoverOnce.Do(func() {
 		if err := allocator.store.Recover(ctx, allocator.client); err != nil {
 			log.Error(err, "Allocator state recovery failed")
-			panic("Recover allocation state failed: " + err.Error())
+			os.Exit(1)
 		}
 	})
 }
