@@ -575,7 +575,7 @@ func (r *PoolReconciler) getMaxUnavailable(pool *sandboxv1alpha1.Pool, desiredTo
 func (r *PoolReconciler) countNotReadyPods(pods []*corev1.Pod) int32 {
 	var count int32
 	for _, pod := range pods {
-		if !utils.IsPodReady(pod) {
+		if !isPodReady(pod) {
 			count++
 		}
 	}

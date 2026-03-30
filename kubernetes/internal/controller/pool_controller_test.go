@@ -119,6 +119,9 @@ var _ = Describe("Pool scale", func() {
 			Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
 			pool.Spec.CapacitySpec.BufferMin = 2
 			pool.Spec.CapacitySpec.BufferMax = 2
+			pool.Spec.ScaleStrategy = &sandboxv1alpha1.ScaleStrategy{
+				MaxUnavailable: ptr.To(intstr.FromString("100%")),
+			}
 			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
 			Eventually(func(g Gomega) {
 				if err := k8sClient.Get(ctx, typeNamespacedName, pool); err != nil {
@@ -135,6 +138,9 @@ var _ = Describe("Pool scale", func() {
 			pool.Spec.CapacitySpec.PoolMax = 2
 			pool.Spec.CapacitySpec.BufferMin = 3
 			pool.Spec.CapacitySpec.BufferMax = 3
+			pool.Spec.ScaleStrategy = &sandboxv1alpha1.ScaleStrategy{
+				MaxUnavailable: ptr.To(intstr.FromString("100%")),
+			}
 			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
 			Eventually(func(g Gomega) {
 				if err := k8sClient.Get(ctx, typeNamespacedName, pool); err != nil {
@@ -323,6 +329,9 @@ var _ = Describe("Pool update", func() {
 			oldRevision := pool.Status.Revision
 			pool.Spec.Template.Labels = map[string]string{
 				"test.pool.update": "v1",
+			}
+			pool.Spec.ScaleStrategy = &sandboxv1alpha1.ScaleStrategy{
+				MaxUnavailable: ptr.To(intstr.FromString("100%")),
 			}
 			Expect(k8sClient.Update(ctx, pool)).To(Succeed())
 			Eventually(func(g Gomega) {
