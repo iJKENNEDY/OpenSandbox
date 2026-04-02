@@ -21,6 +21,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
@@ -28,6 +29,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/alibaba/opensandbox/internal/version"
 )
@@ -41,10 +43,24 @@ func main() {
 	ctx = withLogger(ctx)
 	defer log.Logger.Sync()
 
-	initialRules, err := policy.LoadInitialPolicy(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
+	otelShutdown, err := telemetry.Init(ctx)
+	if err != nil {
+		log.Warnf("OpenTelemetry metrics disabled (continuing without OTLP): %v", err)
+		otelShutdown = nil
+	}
+	if otelShutdown != nil {
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			_ = otelShutdown(shutdownCtx)
+		}()
+	}
+
+	initialRules, _, err := policy.LoadInitialPolicyDetailed(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
 	if err != nil {
 		log.Fatalf("failed to load initial egress policy: %v", err)
 	}
+	logEgressLoaded(initialRules)
 
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
@@ -99,7 +115,13 @@ func main() {
 
 func withLogger(ctx context.Context) context.Context {
 	level := envOrDefault(constants.EnvEgressLogLevel, "info")
-	logger := slogger.MustNew(slogger.Config{Level: level}).Named("opensandbox.egress")
+	cfg := slogger.Config{Level: level}
+	base := slogger.MustNew(cfg)
+	// Fixed dimensions for every log line (sandbox_id, optional OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
+	if extra := telemetry.EgressLogFields(); len(extra) > 0 {
+		base = base.With(extra...)
+	}
+	logger := base.Named("opensandbox.egress")
 	return log.WithLogger(ctx, logger)
 }
 
