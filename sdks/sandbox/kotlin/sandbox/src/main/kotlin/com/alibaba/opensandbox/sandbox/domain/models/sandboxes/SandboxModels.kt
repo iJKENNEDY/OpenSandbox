@@ -369,6 +369,8 @@ class Host private constructor(
     val path: String,
 ) {
     companion object {
+        private val HOST_PATH_PATTERN = Regex("""^(/|[A-Za-z]:[\\/])""")
+
         @JvmStatic
         fun builder(): Builder = Builder()
 
@@ -380,7 +382,9 @@ class Host private constructor(
         private var path: String? = null
 
         fun path(path: String): Builder {
-            require(path.startsWith("/")) { "Host path must be an absolute path starting with '/'" }
+            require(HOST_PATH_PATTERN.containsMatchIn(path)) {
+                "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            }
             this.path = path
             return this
         }

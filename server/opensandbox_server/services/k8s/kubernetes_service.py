@@ -187,7 +187,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     continue
                 
                 # Get status
-                status_info = self.workload_provider.get_status(workload)
+                status_info = self._normalize_create_status(
+                    self.workload_provider.get_status(workload)
+                )
                 current_state = status_info["state"]
                 current_message = status_info["message"]
                 
@@ -238,6 +240,16 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
+    def _normalize_create_status(status_info: Dict[str, Any]) -> Dict[str, Any]:
+        if status_info.get("state") != "Allocated":
+            return status_info
+
+        return {
+            **status_info,
+            "state": "Running",
+            "message": "Pod has IP assigned and sandbox is ready for requests",
+        }
+    
     @staticmethod
     def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
         reason = str(status_info.get("reason") or "")
@@ -383,7 +395,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
                 
                 # Get final status
-                status_info = self.workload_provider.get_status(workload)
+                status_info = self._normalize_create_status(
+                    self.workload_provider.get_status(workload)
+                )
                 effective_platform = self._extract_platform_from_workload(workload)
                 
                 # Build and return response with Running state
