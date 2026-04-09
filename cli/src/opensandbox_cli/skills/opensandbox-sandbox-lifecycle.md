@@ -119,6 +119,7 @@ Use these options deliberately:
 - `--image-auth-username` and `--image-auth-password`: use together when the image is in a private registry
 - `--timeout`: recommended for most temporary workloads so sandboxes do not linger indefinitely
 - `--timeout none`: disable automatic expiration and switch the sandbox to manual cleanup mode
+- omit `--timeout`: use `defaults.timeout` when configured; otherwise the request falls back to the SDK/server default TTL
 - `--entrypoint`: repeat the flag once per argv item; do not use JSON or shell-wrapped command strings
 - `--extension`: repeat for opaque extension key-value pairs that should be passed through as-is
 - `--ready-timeout`: increase this when the image or workload needs more startup time
@@ -229,6 +230,7 @@ Rules:
 
 - `renew` resets the expiration to approximately `now + timeout`; treat it as a fresh TTL, not a simple additive extension to the old timestamp
 - `create --timeout none` means no automatic expiration; cleanup becomes an explicit `kill` responsibility
+- `create` without `--timeout` does not mean manual cleanup; it uses `defaults.timeout` first and otherwise leaves TTL selection to the SDK/server default
 - `pause` and `resume` may depend on the underlying runtime; if the runtime does not support them, avoid promising they will work
 - host-path volumes depend on server-side allowed host path configuration
 - if creation fails or the sandbox never becomes healthy, switch to `sandbox-troubleshooting` instead of adding more create flags blindly

@@ -26,7 +26,7 @@ def _fetch_plain_text(obj: ClientContext, sandbox_id: str, endpoint: str, params
     """Fetch a diagnostics endpoint and return the plain-text body."""
     sandbox_id = obj.resolve_sandbox_id(sandbox_id)
     client = obj.get_devops_client()
-    resp = client.get(f"/sandboxes/{sandbox_id}/diagnostics/{endpoint}", params=params)
+    resp = client.get(f"sandboxes/{sandbox_id}/diagnostics/{endpoint}", params=params)
     if resp.status_code == 404:
         raise click.ClickException(f"Sandbox '{sandbox_id}' not found.")
     resp.raise_for_status()

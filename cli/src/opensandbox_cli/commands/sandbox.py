@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import click
 from opensandbox.models.sandboxes import (
@@ -93,7 +94,7 @@ def _normalize_sandbox_states(states: tuple[str, ...]) -> list[str] | None:
     "-t",
     "timeout_raw",
     default=None,
-    help="Sandbox lifetime (e.g. 10m, 1h) or 'none' for manual cleanup mode.",
+    help="Sandbox lifetime (e.g. 10m, 1h), 'none' for manual cleanup, or omit to use defaults.timeout / SDK default TTL.",
 )
 @click.option("--env", "-e", "envs", multiple=True, type=KEY_VALUE, help="Environment variable (KEY=VALUE). Repeatable.")
 @click.option("--metadata", "-m", "metadata_kv", multiple=True, type=KEY_VALUE, help="Metadata (KEY=VALUE). Repeatable.")
@@ -206,7 +207,7 @@ def sandbox_create(
             "id": sandbox.id,
             "image": image,
             "status": "created",
-            "timeout": "manual-cleanup" if timeout is None else str(timeout),
+            "timeout": _describe_create_timeout(timeout_is_set, timeout),
         },
         title="Sandbox Created",
     )
@@ -516,7 +517,10 @@ def _watch_sandbox_metrics(obj: ClientContext, sandbox) -> None:  # type: ignore
         with client.stream("GET", "/metrics/watch", headers=headers) as response:
             response.raise_for_status()
             for line in response.iter_lines():
-                metric = _parse_metric_stream_line(line)
+                metric, warning = _parse_metric_stream_line(line)
+                if warning:
+                    obj.output.warning(warning)
+                    continue
                 if metric is None:
                     continue
                 _render_stream_metric(obj, metric)
@@ -524,16 +528,31 @@ def _watch_sandbox_metrics(obj: ClientContext, sandbox) -> None:  # type: ignore
         return
 
 
-def _parse_metric_stream_line(line: str) -> SandboxMetrics | None:
+def _parse_metric_stream_line(line: str) -> tuple[SandboxMetrics | None, str | None]:
     """Parse one line from the metrics SSE stream."""
     stripped = line.strip()
     if not stripped or stripped.startswith((":","event:", "id:", "retry:")):
-        return None
+        return None, None
 
     payload = stripped[5:].strip() if stripped.startswith("data:") else stripped
     if not payload:
-        return None
-    return SandboxMetrics.model_validate(json.loads(payload))
+        return None, None
+
+    decoded: Any = json.loads(payload)
+    if isinstance(decoded, dict) and decoded.get("error"):
+        return None, f"Metrics stream error: {decoded['error']}"
+    return SandboxMetrics.model_validate(decoded), None
+
+
+def _describe_create_timeout(
+    timeout_is_set: bool, timeout: timedelta | None
+) -> str:
+    """Describe the sandbox timeout mode shown in create output."""
+    if not timeout_is_set:
+        return "sdk-default"
+    if timeout is None:
+        return "manual-cleanup"
+    return str(timeout)
 
 
 def _render_stream_metric(obj: ClientContext, metric: SandboxMetrics) -> None:

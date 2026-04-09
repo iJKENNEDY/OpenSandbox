@@ -315,6 +315,26 @@ class TestSandboxCreate:
         data = json.loads(result.output)
         assert data["timeout"] == "manual-cleanup"
 
+    def test_create_reports_sdk_default_timeout_when_unset(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(
+                cli,
+                ["sandbox", "create", "-o", "json", "--image", "python:3.12"],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0
+        assert "timeout" not in mock_create.call_args.kwargs
+        data = json.loads(result.output)
+        assert data["timeout"] == "sdk-default"
+
     def test_create_supports_default_timeout_none(self, runner: CliRunner) -> None:
         mock_sb = MagicMock()
         mock_sb.id = "sb-123"
@@ -600,6 +620,55 @@ class TestSandboxMetrics:
         assert len(lines) == 2
         assert lines[0]["cpu_used_percentage"] == 12.5
         assert lines[1]["memory_used_in_mib"] == 300
+
+    def test_metrics_watch_warns_and_continues_on_error_events(self, runner: CliRunner) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.lines = [
+                    'data: {"cpu_count": 2, "cpu_used_percentage": 12.5, "memory_total_in_mib": 1024, "memory_used_in_mib": 256, "timestamp": 1710000000000}',
+                    'data: {"error": "failed to get CPU percent"}',
+                    'data: {"cpu_count": 2, "cpu_used_percentage": 18.0, "memory_total_in_mib": 1024, "memory_used_in_mib": 300, "timestamp": 1710000001000}',
+                ]
+
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def iter_lines(self):
+                yield from self.lines
+
+        mock_sb = MagicMock()
+        mock_sb.metrics._httpx_client.stream.return_value = _FakeResponse()
+
+        result = _invoke(
+            runner,
+            ["sandbox", "metrics", "sb-1", "--watch", "-o", "json"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        decoder = json.JSONDecoder()
+        items: list[dict[str, object]] = []
+        raw = result.output.strip()
+        index = 0
+        while index < len(raw):
+            while index < len(raw) and raw[index].isspace():
+                index += 1
+            if index >= len(raw):
+                break
+            item, next_index = decoder.raw_decode(raw, index)
+            items.append(item)
+            index = next_index
+
+        assert len(items) == 3
+        assert items[0]["cpu_used_percentage"] == 12.5
+        assert items[1]["status"] == "warning"
+        assert items[1]["message"] == "Metrics stream error: failed to get CPU percent"
+        assert items[2]["cpu_used_percentage"] == 18.0
 
 
 class TestSandboxEndpoint:
@@ -998,6 +1067,7 @@ class TestDevopsCommands:
         assert result.exit_code == 0
         assert "sandbox logs" in result.output
         mock_client.get.assert_called_once()
+        assert mock_client.get.call_args.args[0] == "sandboxes/sb-1/diagnostics/logs"
 
     def test_logs_reject_json_output(self, runner: CliRunner) -> None:
         result = _invoke(runner, ["devops", "logs", "sb-1", "-o", "json"])
