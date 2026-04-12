@@ -39,8 +39,6 @@ var (
 	lastNftRuleCount atomic.Int64
 )
 
-// egressSharedAttrs is the single source of truth for OTLP metric dimensions and default log fields
-// (sandbox_id + OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
 var egressSharedAttrs = sync.OnceValue(func() []attribute.KeyValue {
 	return inttelemetry.SharedAttrsFromEnv(inttelemetry.SharedAttrsEnvConfig{
 		SandboxIDEnv:  constants.ENVSandboxID,
@@ -110,7 +108,7 @@ func registerEgressMetrics() error {
 
 	_, err = meter.Int64ObservableGauge(
 		"egress.system.memory.usage_bytes",
-		metric.WithDescription("System RAM in use (Linux: MemTotal−MemAvailable from /proc/meminfo; non-Linux: 0)."),
+		metric.WithDescription("System RAM used bytes from gopsutil on Linux (non-Linux build: 0)."),
 		metric.WithUnit("By"),
 		metric.WithInt64Callback(func(ctx context.Context, obs metric.Int64Observer) error {
 			obs.Observe(systemMemoryUsedBytes(), egressMetricOpt())
@@ -123,7 +121,7 @@ func registerEgressMetrics() error {
 
 	_, err = meter.Float64ObservableGauge(
 		"egress.system.cpu.utilization",
-		metric.WithDescription("CPU busy ratio across all cores since last scrape (Linux /proc/stat jiffies; first scrape is 0; non-Linux: 0)."),
+		metric.WithDescription("CPU busy ratio 0-1 from gopsutil on Linux (non-Linux build: 0)."),
 		metric.WithUnit("1"),
 		metric.WithFloat64Callback(func(ctx context.Context, obs metric.Float64Observer) error {
 			obs.Observe(cpuUtilizationRatio(), egressMetricOpt())
