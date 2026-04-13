@@ -107,6 +107,19 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// getKindFromType returns the Kind name for a given runtime.Object using the scheme.
+// It panics if the object's kind cannot be determined.
+func getKindFromType(obj runtime.Object) string {
+	gvks, _, err := scheme.ObjectKinds(obj)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get kind for object %T: %v", obj, err))
+	}
+	if len(gvks) == 0 {
+		panic(fmt.Sprintf("no kind registered for object %T", obj))
+	}
+	return gvks[0].Kind
+}
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
@@ -169,7 +182,7 @@ func main() {
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
 	flag.Var(&concurrencyConfig, "concurrency", "Controller concurrency settings in format: controller1=N;controller2=M. "+
 		"Available controllers: batchsandbox, pool. "+
-		"Example: --concurrency=batchsandbox=32;pool=128")
+		"Example: --concurrency='batchsandbox=32;pool=128'")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -318,9 +331,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	batchSandboxConcurrency := concurrencyConfig.Get("batchsandbox", defaultBatchSandboxConcurrency)
-	poolConcurrency := concurrencyConfig.Get("pool", defaultPoolConcurrency)
-	setupLog.Info("controller concurrency configured", "batchsandbox", batchSandboxConcurrency, "pool", poolConcurrency)
+	var (
+		batchSandboxKindName = strings.ToLower(getKindFromType(&sandboxv1alpha1.BatchSandbox{}))
+		poolKindName         = strings.ToLower(getKindFromType(&sandboxv1alpha1.Pool{}))
+	)
+	batchSandboxConcurrency := concurrencyConfig.Get(batchSandboxKindName, defaultBatchSandboxConcurrency)
+	poolConcurrency := concurrencyConfig.Get(poolKindName, defaultPoolConcurrency)
+	setupLog.Info("controller concurrency configured", batchSandboxKindName, batchSandboxConcurrency, poolKindName, poolConcurrency)
 
 	if err := (&controller.BatchSandboxReconciler{
 		Client:   mgr.GetClient(),

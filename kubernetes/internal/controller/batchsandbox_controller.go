@@ -197,52 +197,15 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	if taskStrategy.NeedTaskScheduling() {
-		// Because tasks are in-memory and there is no event mechanism, periodic reconciliation is required.
-		DurationStore.Push(types.NamespacedName{Namespace: batchSbx.Namespace, Name: batchSbx.Name}.String(), 3*time.Second)
-		sch, err := r.getTaskScheduler(ctx, batchSbx, pods)
+		ts, err := r.reconcileTasks(ctx, batchSbx, pods)
 		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if batchSbx.DeletionTimestamp != nil {
-			stoppingTasks := sch.StopTask()
-			if len(stoppingTasks) > 0 {
-				log.Info("stopping tasks", "count", len(stoppingTasks))
-			}
-		}
-		now := time.Now()
-		taskStatus, err := r.scheduleTasks(ctx, sch, batchSbx)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to schedule tasks, err %w", err)
-		}
-		log.Info("schedule tasks completed", "costMs", time.Since(now).Milliseconds())
-		newStatus.TaskRunning = taskStatus.Running
-		newStatus.TaskFailed = taskStatus.Failed
-		newStatus.TaskSucceed = taskStatus.Succeed
-		newStatus.TaskUnknown = taskStatus.Unknown
-		newStatus.TaskPending = taskStatus.Pending
-		// check task cleanup is finished
-		if batchSbx.DeletionTimestamp != nil {
-			unfinishedTasks := r.getTasksCleanupUnfinished(batchSbx, sch)
-			if len(unfinishedTasks) > 0 {
-				log.Info("tasks cleanup is unfinished", "unfinishedCount", len(unfinishedTasks))
-			} else {
-				var err error
-				if controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
-					err = utils.UpdateFinalizer(r.Client, batchSbx, utils.RemoveFinalizerOpType, FinalizerTaskCleanup)
-					if err != nil {
-						if errors.IsNotFound(err) {
-							err = nil
-						} else {
-							log.Error(err, "failed to remove finalizer", "finalizer", FinalizerTaskCleanup)
-						}
-					}
-				}
-				if err == nil {
-					r.deleteTaskScheduler(ctx, batchSbx)
-					log.Info("task cleanup is finished, removed finalizer", "finalizer", FinalizerTaskCleanup)
-				}
-				return ctrl.Result{}, err
-			}
+			aggErrors = append(aggErrors, err)
+		} else if ts != nil {
+			newStatus.TaskRunning = ts.Running
+			newStatus.TaskFailed = ts.Failed
+			newStatus.TaskSucceed = ts.Succeed
+			newStatus.TaskUnknown = ts.Unknown
+			newStatus.TaskPending = ts.Pending
 		}
 	}
 
@@ -293,6 +256,64 @@ func calPodIndex(poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.B
 		}
 	}
 	return podIndex, nil
+}
+
+func (r *BatchSandboxReconciler) reconcileTasks(
+	ctx context.Context,
+	batchSbx *sandboxv1alpha1.BatchSandbox,
+	pods []*corev1.Pod,
+) (*taskScheduleResult, error) {
+	log := logf.FromContext(ctx)
+
+	sch, err := r.getTaskScheduler(ctx, batchSbx, pods)
+	if err != nil {
+		return nil, err
+	}
+
+	// Because tasks are in-memory and there is no event mechanism, periodic reconciliation is required.
+	DurationStore.Push(types.NamespacedName{Namespace: batchSbx.Namespace, Name: batchSbx.Name}.String(), 3*time.Second)
+
+	if batchSbx.DeletionTimestamp != nil {
+		stoppingTasks := sch.StopTask()
+		if len(stoppingTasks) > 0 {
+			log.Info("stopping tasks", "count", len(stoppingTasks))
+		}
+	}
+
+	now := time.Now()
+	ts, err := r.scheduleTasks(ctx, sch, batchSbx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to schedule tasks, err %w", err)
+	}
+	log.Info("schedule tasks completed", "costMs", time.Since(now).Milliseconds(), "task schedule result", utils.DumpJSON(ts))
+
+	// check task cleanup is finished
+	if batchSbx.DeletionTimestamp != nil {
+		unfinishedTasks := r.getTasksCleanupUnfinished(batchSbx, sch)
+		if len(unfinishedTasks) > 0 {
+			log.Info("tasks cleanup is unfinished", "unfinishedCount", len(unfinishedTasks))
+		} else {
+			var cleanupErr error
+			if controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
+				cleanupErr = utils.UpdateFinalizer(r.Client, batchSbx, utils.RemoveFinalizerOpType, FinalizerTaskCleanup)
+				if cleanupErr != nil {
+					if errors.IsNotFound(cleanupErr) {
+						cleanupErr = nil
+					} else {
+						log.Error(cleanupErr, "failed to remove finalizer", "finalizer", FinalizerTaskCleanup)
+					}
+				}
+			}
+			if cleanupErr == nil {
+				r.deleteTaskScheduler(ctx, batchSbx)
+				log.Info("task cleanup is finished, removed finalizer", "finalizer", FinalizerTaskCleanup)
+			}
+			// all tasks are cleaned up; skip returning task schedule result so the caller doesn't overwrite status
+			return nil, cleanupErr
+		}
+	}
+
+	return ts, nil
 }
 
 func (r *BatchSandboxReconciler) listPods(ctx context.Context, poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
@@ -382,10 +403,10 @@ func (r *BatchSandboxReconciler) deleteTaskScheduler(ctx context.Context, batchS
 	r.taskSchedulers.Delete(key)
 }
 
-func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch taskscheduler.TaskScheduler, batchSbx *sandboxv1alpha1.BatchSandbox) (taskScheduleResult, error) {
+func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch taskscheduler.TaskScheduler, batchSbx *sandboxv1alpha1.BatchSandbox) (*taskScheduleResult, error) {
 	log := logf.FromContext(ctx)
 	if err := tSch.Schedule(); err != nil {
-		return taskScheduleResult{}, err
+		return nil, err
 	}
 	tasks := tSch.ListTask()
 	toReleasedPods := []string{}
@@ -417,11 +438,11 @@ func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch tasksch
 	if len(toReleasedPods) > 0 {
 		log.Info("try to release Pods", "count", len(toReleasedPods))
 		if err := r.releasePods(ctx, batchSbx, toReleasedPods); err != nil {
-			return taskScheduleResult{}, err
+			return nil, err
 		}
 		log.Info("successfully released Pods", "count", len(toReleasedPods))
 	}
-	return taskScheduleResult{
+	return &taskScheduleResult{
 		Running: running,
 		Failed:  failed,
 		Succeed: succeed,
