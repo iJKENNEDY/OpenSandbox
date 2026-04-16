@@ -1462,6 +1462,88 @@ async def test_create_sandbox_windows_profile_accepts_dockur_demo_like_request(m
     assert response.platform.os == "windows"
     assert response.platform.arch == "amd64"
 
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_with_network_policy_maps_windows_ports(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:v1.0.11"
+    cfg.docker.network_mode = "bridge"
+    cfg.egress = EgressConfig(image="opensandbox/egress:latest")
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(
+            root={
+                "cpu": "4",
+                "memory": "8G",
+                "disk": "64G",
+            }
+        ),
+        env={"VERSION": "11"},
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+        networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+    )
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "windows", "Architecture": "amd64"}
+    sidecar = MagicMock()
+    sidecar.id = "sidecar-123"
+
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            return_value=None,
+        ),
+        patch("opensandbox_server.services.docker.generate_egress_token", return_value="egress-token"),
+        patch(
+            "opensandbox_server.services.docker.allocate_port_bindings",
+            return_value={
+                "44772": ("0.0.0.0", 51664),
+                "8080": ("0.0.0.0", 48891),
+                "3389/tcp": ("0.0.0.0", 53389),
+                "3389/udp": ("0.0.0.0", 53390),
+                "8006/tcp": ("0.0.0.0", 58006),
+            },
+        ),
+        patch.object(service, "_start_egress_sidecar", return_value=sidecar) as mock_start_sidecar,
+        patch.object(
+            service,
+            "_create_and_start_container",
+            return_value=created_container,
+        ) as mock_create,
+    ):
+        await service.create_sandbox(request)
+
+    _, start_kwargs = mock_start_sidecar.call_args
+    assert start_kwargs["host_execd_port"] == 51664
+    assert start_kwargs["host_http_port"] == 48891
+    assert start_kwargs["extra_port_bindings"] == {
+        "3389/tcp": ("0.0.0.0", 53389),
+        "3389/udp": ("0.0.0.0", 53390),
+        "8006/tcp": ("0.0.0.0", 58006),
+    }
+
+    forwarded_env = mock_create.call_args.args[4]
+    host_config_kwargs = mock_create.call_args.args[5]
+    forwarded_ports = mock_create.call_args.args[6]
+    labels = mock_create.call_args.args[3]
+
+    assert "USER_PORTS=44772,8080,3389,8006" in forwarded_env
+    assert host_config_kwargs["network_mode"] == "container:sidecar-123"
+    assert "NET_ADMIN" in set(host_config_kwargs.get("cap_add") or [])
+    assert "NET_ADMIN" not in set(host_config_kwargs.get("cap_drop") or [])
+    assert "3389/tcp" in forwarded_ports
+    assert "3389/udp" in forwarded_ports
+    assert "8006/tcp" in forwarded_ports
+    assert labels["opensandbox.io/embedding-proxy-port"] == "51664"
+    assert labels["opensandbox.io/http-port"] == "48891"
+
+
 def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
     service = DockerSandboxService(config=_app_config())
     manual_container = MagicMock()
