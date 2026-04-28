@@ -263,7 +263,7 @@ pool.shutdown(true);
 - 如果你需要在 warmup 成功后、`putIdle` 之前对沙箱做预处理，可以使用 `warmupSandboxPreparer(...)`。
 
 
-> 在分布式部署场景下，需要由业务方自行提供 `PoolStateStore` 实现，并保证其满足分布式语义：原子 `tryTakeIdle`、`put/remove` 幂等、主锁所有权与续约、不同 `poolName` 隔离、以及计数一致性。
+> 在分布式部署场景下，可以使用可选模块 `com.alibaba.opensandbox:sandbox-pool-redis`，也可以自行提供 `PoolStateStore` 实现。Redis 模块接收业务方自己创建和管理的 Jedis client，因此 Redis 连接配置和生命周期仍由业务方负责。
 
 ## 配置说明
 

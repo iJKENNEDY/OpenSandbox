@@ -262,7 +262,7 @@ Pool lifecycle semantics:
 - Use `warmupSandboxPreparer(...)` if you need to prepare a sandbox after warmup readiness succeeds and before it is put into the idle pool.
 
 
-> For distributed deployment, your application must provide a `PoolStateStore` implementation and ensure it satisfies distributed semantics (atomic idle take, idempotent put/remove, lock ownership/renewal, pool isolation, and consistent counters).
+> For distributed deployment, use the optional `com.alibaba.opensandbox:sandbox-pool-redis` module or provide a custom `PoolStateStore` implementation. The Redis module accepts a caller-managed Jedis client, so your application keeps ownership of Redis connection configuration and lifecycle.
 
 ## Configuration
 

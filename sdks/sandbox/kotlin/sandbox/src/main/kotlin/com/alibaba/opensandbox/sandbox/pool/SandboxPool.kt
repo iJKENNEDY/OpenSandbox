@@ -421,7 +421,7 @@ class SandboxPool internal constructor(
                 config = reconcileConfig,
                 stateStore = stateStore,
                 createOne = { createOneSandbox() },
-                onOrphanedCreated = { sandboxId -> killSandboxBestEffort(sandboxId) },
+                onDiscardSandbox = { sandboxId -> killSandboxBestEffort(sandboxId) },
                 reconcileState = reconcileState,
                 warmupExecutor = executor,
             )
@@ -565,6 +565,20 @@ class SandboxPool internal constructor(
         scheduler = null
         warmupExecutor?.let { shutdownExecutor(it, "warmup") }
         warmupExecutor = null
+        releasePrimaryLockBestEffort()
+    }
+
+    private fun releasePrimaryLockBestEffort() {
+        try {
+            stateStore.releasePrimaryLock(config.poolName, config.ownerId)
+        } catch (e: Exception) {
+            logger.warn(
+                "Pool primary lock release failed (best-effort): pool_name={} owner_id={} error={}",
+                config.poolName,
+                config.ownerId,
+                e.message,
+            )
+        }
     }
 
     private fun shutdownExecutor(
