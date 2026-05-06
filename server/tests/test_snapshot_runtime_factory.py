@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from opensandbox_server.services.docker_snapshot_runtime import DockerSnapshotRuntime
+from opensandbox_server.services.docker.snapshot_runtime import DockerSnapshotRuntime
 from opensandbox_server.services.k8s.snapshot_runtime import KubernetesSnapshotRuntime
 from opensandbox_server.services.snapshot_runtime_factory import create_snapshot_runtime
 
