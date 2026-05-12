@@ -57,6 +57,16 @@ class PoolReconcilerStateTest {
     }
 
     @Test
+    fun `default degraded backoff starts at thirty seconds`() {
+        val state = ReconcileState(degradedThreshold = 1)
+
+        state.recordFailure("boom")
+
+        assertEquals(true, state.isBackoffActive(Instant.now().plus(Duration.ofSeconds(29))))
+        assertFalse(state.isBackoffActive(Instant.now().plus(Duration.ofSeconds(31))))
+    }
+
+    @Test
     fun `reconcile create exception increments failure count once per task`() {
         val stateStore = InMemoryPoolStateStore()
         val config =

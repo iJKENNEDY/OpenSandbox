@@ -31,6 +31,15 @@ def test_degraded_backoff_caps_at_one_day() -> None:
     assert not state.is_backoff_active(datetime.now(timezone.utc) + timedelta(hours=25))
 
 
+def test_degraded_backoff_starts_at_thirty_seconds() -> None:
+    state = ReconcileState(degraded_threshold=1)
+
+    state.record_failure("boom")
+
+    assert state.is_backoff_active(datetime.now(timezone.utc) + timedelta(seconds=29))
+    assert not state.is_backoff_active(datetime.now(timezone.utc) + timedelta(seconds=31))
+
+
 def test_acquire_fail_fast_empty_raises_pool_empty() -> None:
     pool = _create_pool(max_idle=0)
     pool.start()
