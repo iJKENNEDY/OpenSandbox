@@ -58,7 +58,16 @@ internal class ReconcileState(
 
     @Synchronized
     fun recordFailure(errorMessage: String?) {
-        failureCount++
+        recordFailures(1, errorMessage)
+    }
+
+    @Synchronized
+    fun recordFailures(
+        count: Int,
+        errorMessage: String?,
+    ) {
+        if (count <= 0) return
+        failureCount += count
         lastError = errorMessage
         if (failureCount >= degradedThreshold) {
             state = PoolState.DEGRADED
