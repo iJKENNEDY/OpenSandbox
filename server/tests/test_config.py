@@ -170,6 +170,7 @@ def test_server_config_uvicorn_tuning_defaults():
     assert server_cfg.workers == 1
     assert server_cfg.limit_concurrency == 1024
     assert server_cfg.backlog == 2048
+    assert server_cfg.thread_pool_size == 200
     assert server_cfg.loop == "auto"
     assert server_cfg.http == "auto"
 
@@ -204,6 +205,13 @@ def test_server_config_limit_concurrency_must_be_positive_when_set():
 def test_server_config_backlog_must_be_positive():
     with pytest.raises(ValidationError):
         ServerConfig(backlog=0)
+
+
+def test_server_config_thread_pool_size_must_be_positive():
+    with pytest.raises(ValidationError):
+        ServerConfig(thread_pool_size=0)
+    cfg = ServerConfig(thread_pool_size=512)
+    assert cfg.thread_pool_size == 512
 
 
 def test_server_config_loop_and_http_reject_unknown_values():

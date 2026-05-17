@@ -61,6 +61,10 @@ async def lifespan(app: FastAPI):
         logger.error("API key startup confirmation failed: %s", exc)
         os._exit(1)
 
+    from anyio.to_thread import current_default_thread_limiter
+
+    current_default_thread_limiter().total_tokens = app_config.server.thread_pool_size
+
     app.state.http_client = httpx.AsyncClient(timeout=180.0)
 
     # Validate secure runtime configuration at startup

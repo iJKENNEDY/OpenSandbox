@@ -478,6 +478,16 @@ class ServerConfig(BaseModel):
         ge=1,
         description="Socket listen backlog passed to uvicorn.",
     )
+    thread_pool_size: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Maximum size of the anyio default threadpool used by FastAPI "
+            "to run sync route handlers. Default anyio limit is 40, which "
+            "throttles bursts of blocking sandbox list/get/delete operations "
+            "under high concurrency."
+        ),
+    )
     loop: Literal["auto", "uvloop", "asyncio"] = Field(
         default="auto",
         description=(

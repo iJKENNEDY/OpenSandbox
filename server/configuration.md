@@ -69,6 +69,7 @@ Example files in this repository:
 | `workers` | integer | `1` | Number of uvicorn worker processes. Each worker is a separate Python process with its own event loop and (under the Kubernetes runtime) its own informer watch streams to the apiserver. Default `1` keeps apiserver pressure predictable; bump to 2–8 based on CPU quota and apiserver capacity. Ignored when `--reload` is set. |
 | `limit_concurrency` | integer \| omitted | `1024` | Maximum concurrent connections per worker before returning 503. Provides backpressure protection under burst load. Omit to disable. |
 | `backlog` | integer | `2048` | Socket listen backlog passed to uvicorn. |
+| `thread_pool_size` | integer | `200` | Maximum size of the anyio default threadpool used by FastAPI to run sync route handlers. The anyio default of 40 throttles bursts of blocking sandbox list/get/delete operations under high concurrency. |
 | `loop` | `"auto"` \| `"uvloop"` \| `"asyncio"` | `"auto"` | Event loop implementation. `auto` prefers uvloop and falls back to asyncio. |
 | `http` | `"auto"` \| `"httptools"` \| `"h11"` | `"auto"` | HTTP protocol parser. `auto` prefers httptools and falls back to h11. |
 
