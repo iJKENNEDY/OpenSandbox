@@ -86,7 +86,7 @@ to:
 | R2 | Plaintext credentials are not exposed through sandbox env vars, files, lifecycle API responses, command output, or diagnostic APIs | Must Have |
 | R3 | Credential Proxy injects credentials only for matching FQDN, HTTP method, and path scope | Must Have |
 | R4 | Initial injection supports HTTP request headers | Must Have |
-| R5 | Kubernetes Secret and server-local configuration can be used as credential sources | Must Have |
+| R5 | Kubernetes Secret, server-local configuration, and inline ephemeral values can be used as credential sources | Must Have |
 | R6 | Credential bindings can be validated against `networkPolicy.egress` when both are present | Should Have |
 | R7 | Audit logs and metrics identify binding usage without logging credential values | Must Have |
 | R8 | Docker and Kubernetes runtimes use the same user-facing API semantics | Must Have |
@@ -153,6 +153,7 @@ At a high level:
 |------|--------|------------|
 | Sandbox bypasses Credential Proxy | Credential not injected, or traffic reaches destination without policy mediation | Use egress transparent redirect for TCP 80/443 and recommend `networkPolicy.defaultAction=deny` with `dns+nft` |
 | Credential leakage through logs | Secret exposure | Central redaction helpers; never log injected headers or rendered values; regression tests for logs |
+| Inline ephemeral value leaked by lifecycle logging | Secret exposure | Treat `inlineEphemeral.value` as write-only input; redact request bodies, validation errors, SDK debug logs, and persisted sandbox metadata |
 | Credential source over-permissioned to sidecars | Cluster-wide secret access risk | Server resolves sources and passes only sandbox-scoped material; sidecar has no Kubernetes API permission by default |
 | Binding and egress policy drift | Credential may be configured for unreachable or unintended destinations | Validate binding targets against `networkPolicy.egress`; expose diagnostics for mismatches |
 | Header injection into wrong host due to redirects | Credential sent to unintended destination | Re-evaluate policy after each redirected request; strip injected credentials on cross-host redirect unless target scope matches |
@@ -253,15 +254,21 @@ components:
 
     CredentialSourceRef:
       type: object
-      required: [type, name]
+      required: [type]
       properties:
         type:
           type: string
-          enum: [kubernetesSecret, serverLocal]
+          enum: [kubernetesSecret, serverLocal, inlineEphemeral]
         name:
           type: string
+          description: Provider-local credential source name. Required for kubernetesSecret and serverLocal; omitted for inlineEphemeral.
         key:
           type: string
+          description: Provider-local key name for multi-key sources.
+        value:
+          type: string
+          writeOnly: true
+          description: Inline ephemeral credential value accepted only at sandbox creation time. Never returned, logged, or persisted as plaintext.
       additionalProperties: false
 
     CredentialScope:
@@ -340,7 +347,7 @@ Example request:
 
 ### Credential Sources
 
-The MVP supports two source types.
+The MVP supports three source types.
 
 1. **Kubernetes Secret**
    - Available only for Kubernetes runtime.
@@ -360,6 +367,25 @@ enabled = true
 type = "server_local"
 name = "github-readonly-token"
 value_env = "OPENSANDBOX_GITHUB_READONLY_TOKEN"
+```
+
+3. **Inline ephemeral source**
+   - Available for cases where an upper-layer platform creates a sandbox-scoped credential at sandbox creation time.
+   - The inline value is accepted only in `CreateSandboxRequest`.
+   - The OpenSandbox server must treat the value as write-only: do not return it in lifecycle responses, do not persist it as plaintext, and redact it from logs and validation errors.
+   - The server converts the value into sandbox-scoped runtime credential material for the egress sidecar / Credential Proxy.
+   - For Kubernetes, the runtime material may be represented as a generated Secret that is mounted only into the egress sidecar, not the application container.
+   - Generated runtime Secrets must be labeled with the sandbox identity and cleaned up when the sandbox is deleted. Use `ownerReferences` where possible and finalizers only when external revocation or cross-namespace cleanup is required.
+
+Example:
+
+```json
+{
+  "sourceRef": {
+    "type": "inlineEphemeral",
+    "value": "ghp_xxx"
+  }
+}
 ```
 
 Future providers may include HashiCorp Vault, Infisical, AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and internal credential brokers.
@@ -467,6 +493,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - Validate `CreateSandboxRequest.credentialVault`.
 - Persist credential binding metadata without plaintext credential values.
 - Resolve or prepare sandbox-scoped credential material during sandbox creation.
+- Redact `inlineEphemeral.value` from request logging, validation errors, persisted metadata, and lifecycle responses.
 - Enable egress transparent mitmproxy and credential addon bootstrap for Docker and Kubernetes runtimes when bindings are present.
 
 #### Components / Egress
@@ -480,6 +507,8 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 
 - Enable the egress sidecar with transparent mitmproxy when credential bindings are present.
 - Add secret projection or bootstrap delivery for sandbox-scoped credential material.
+- For `inlineEphemeral`, optionally create a generated sandbox-scoped Kubernetes Secret mounted only into the egress sidecar.
+- Generated runtime Secrets must use labels and `ownerReferences` when possible; finalizers are reserved for cleanup that Kubernetes garbage collection cannot cover.
 - Ensure Credential Proxy has no broad Kubernetes API permissions by default.
 - Ensure the mitmproxy CA is trusted by the sandbox application container when HTTPS interception is enabled.
 
@@ -504,13 +533,16 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - Multiple matching bindings fail closed.
 - Existing headers with the injection name are replaced or rejected according to the selected implementation rule.
 - Redaction removes credential values from logs and errors.
+- `inlineEphemeral.value` is accepted only as write-only create input and never appears in serialized sandbox metadata or API responses.
 - Egress validation catches binding targets not allowed by `networkPolicy.egress`.
 
 ### Integration Tests
 
 - Docker sandbox with server-local source can call a mock HTTP/HTTPS server that requires an injected header without setting proxy or base URL configuration.
+- Docker sandbox with inline ephemeral source can call a mock HTTP/HTTPS server and cannot recover the inline credential from environment, filesystem, diagnostics, or lifecycle responses.
 - Docker sandbox cannot read credential value from environment variables, mounted files, lifecycle API response, command output, or diagnostics.
 - Kubernetes sandbox with Kubernetes Secret source can call a mock HTTP/HTTPS server that requires an injected header without setting proxy or base URL configuration.
+- Kubernetes sandbox with inline ephemeral source creates sandbox-scoped runtime material mounted only into the egress sidecar and cleans it up on sandbox deletion.
 - Credential Proxy denies non-matching hosts, paths, and methods.
 - Cross-host redirect strips or re-evaluates injected credentials.
 - Sandbox deletion cleans up Credential Proxy and any sandbox-scoped credential material.
@@ -556,6 +588,7 @@ Explicit proxy and local gateway modes avoid transparent network interception, b
 - No new Credential Proxy component image for the MVP; Credential Proxy is implemented in the existing egress image through transparent mitmproxy and a first-party credential addon.
 - Server configuration for credential source providers.
 - Kubernetes RBAC for server-side secret reads where Kubernetes Secret sources are enabled.
+- Kubernetes permission to create/delete sandbox-scoped runtime Secrets when `inlineEphemeral` is enabled for Kubernetes runtime.
 - CI tests for Docker and Kubernetes runtime paths.
 - Documentation and examples for common credential binding patterns.
 - Sandbox image or runtime support for trusting the OpenSandbox mitmproxy CA.
