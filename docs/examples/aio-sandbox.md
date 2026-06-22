@@ -73,7 +73,7 @@ AIO portal endpoint: 127.0.0.1:56123
 Screenshot saved to sandbox_screenshot.png
 ```
 
-![AIO Sandbox screenshot](/images/aio-sandbox-screenshot.png)
+![AIO Sandbox screenshot](../public/images/aio-sandbox-screenshot.png)
 
 ## More examples
 

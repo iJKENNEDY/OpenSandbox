@@ -71,7 +71,7 @@ export SANDBOX_PVC_NAME=my-pvc
 python examples/kubernetes-pvc-volume-mount/main.py
 ```
 
-![Kubernetes PVC Volume Mount demo](/images/kubernetes-pvc-volume-mount-demo.png)
+![Kubernetes PVC Volume Mount demo](../public/images/kubernetes-pvc-volume-mount-demo.png)
 
 ## What the Example Does
 
