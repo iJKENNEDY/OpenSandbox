@@ -19,9 +19,6 @@
   <a href="https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--opensandbox">
     <img src="https://img.shields.io/badge/CNCF-Landscape-0C66E4?style=flat-square" alt="CNCF Landscape" />
   </a>
-  <a href="https://discord.gg/p3hggJf7HM">
-    <img src="https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" />
-  </a>
   <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,A4Bgl5q1I1eNU/r33D18YFNrMY108aFF38V+r19RJOM=&_dt_no_comment=1&origin=11">
     <img src="https://img.shields.io/badge/DingTalk-Join-0089FF?style=flat-square&logo=dingtalk&logoColor=white" alt="DingTalk" />
   </a>
@@ -309,7 +306,6 @@ and how roadmap items are managed.
 
 - Issues: Submit bugs, feature requests, or design discussions through GitHub Issues
 - DingTalk: Join the [OpenSandbox technical discussion group](https://qr.dingtalk.com/action/joingroup?code=v1,k1,A4Bgl5q1I1eNU/r33D18YFNrMY108aFF38V+r19RJOM=&_dt_no_comment=1&origin=11)
-- Discord: Join the [OpenSandbox Discord community](https://discord.gg/p3hggJf7HM)
 
 ## Star History
 
