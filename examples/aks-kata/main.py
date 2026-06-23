@@ -127,14 +127,22 @@ def _wait_sandbox_ready(sandbox, timeout_seconds: int = 300) -> None:
     start = time.time()
     while time.time() - start < timeout_seconds:
         try:
-            state = sandbox.get_info().status.state
-            if state == SandboxState.RUNNING:
-                time.sleep(15)
-                return
-            print(f"[setup] sandbox state: {state}, waiting...")
+            status = sandbox.get_info().status
         except Exception:
-            pass
+            # Transient API error while the sandbox is starting; retry.
+            time.sleep(3)
+            continue
+
+        if status.state == SandboxState.RUNNING:
+            # Let the execd / egress sidecars finish initializing.
+            time.sleep(15)
+            return
+        if status.state == SandboxState.FAILED:
+            detail = status.message or status.reason or "no detail provided"
+            raise RuntimeError(f"Sandbox failed to start: {detail}")
+        print(f"[setup] sandbox state: {status.state}, waiting...")
         time.sleep(3)
+
     raise RuntimeError(
         f"Sandbox did not reach Running state within {timeout_seconds}s"
     )
